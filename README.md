@@ -63,7 +63,7 @@ If you want to contribute or build the app yourself:
 ### Installation
 ```bash
 # 1. Clone the repo
-git clone [https://github.com/shravankrishnan007/p2p-file-share.git](https://github.com/YOUR_USERNAME/p2p-file-share.git)
+git clone [https://github.com/shravankrishnan007/p2p-file-share.git](https://github.com/shravankrishnan007/p2p-file-share.git)
 cd p2p-file-share
 
 # 2. Install dependencies
