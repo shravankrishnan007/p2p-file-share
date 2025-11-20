@@ -7,7 +7,7 @@ A modern, private, and limitless file-sharing application for your desktop. Tran
 
 Get the latest version for Windows:
 
-[![Download Windows Installer](https://img.shields.io/badge/Download-.exe-0078D6?style=for-the-badge&logo=windows)](https://github.com/YOUR_USERNAME/p2p-file-share/releases/latest/download/Secure.P2P.Share.Setup.1.0.0.exe)
+[![Download Windows Installer](https://img.shields.io/badge/Download-.exe-0078D6?style=for-the-badge&logo=windows)](https://github.com/shravankrishnan007/p2p-file-share/releases/latest/download/Secure.P2P.Share.Setup.1.0.0.exe)
 
 > **Note:** Since this is an open-source tool, Windows SmartScreen might warn you that the publisher is unknown. Click **"More Info"** -> **"Run Anyway"** to install.
 
