@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>P2P Download Manager</title>
+  </head>
+  <body>
+    
+    <div id="app-container">
+      <aside class="sidebar">
+        <div class="sidebar-header">
+          <span>Active Rooms</span>
+          <button id="open-modal-btn" class="add-btn" title="New Room">+</button>
+        </div>
+        <ul id="room-list">
+          </ul>
+      </aside>
+
+      <main class="main-area" id="room-container">
+        <div id="empty-state" style="text-align: center; margin-top: 100px; color: #666;">
+          <h2>No Room Selected</h2>
+          <p>Click + to create or join a room.</p>
+        </div>
+        </main>
+    </div>
+
+    <div id="modal-overlay" class="modal-overlay">
+      <div class="modal">
+        <h2 style="margin-top:0">New Connection</h2>
+        
+        <div style="margin-bottom: 20px;">
+          <label style="display:block; margin-bottom:5px; font-size:0.9rem">Create New</label>
+          <button id="create-room-btn" class="primary-btn" style="width:100%">Generate Room ID</button>
+        </div>
+
+        <div style="display:flex; align-items:center; gap:10px; margin: 15px 0; color:#666">
+          <hr style="flex:1; border-color:#444"> OR <hr style="flex:1; border-color:#444">
+        </div>
+
+        <div style="margin-bottom: 20px;">
+          <label style="display:block; margin-bottom:5px; font-size:0.9rem">Join Existing</label>
+          <input type="text" id="room-input" placeholder="Paste Room ID..." />
+        </div>
+
+        <div style="display:flex; justify-content: flex-end; gap: 10px;">
+          <button id="close-modal-btn" style="background:transparent; color:#aaa">Cancel</button>
+          <button id="join-room-btn" class="success-btn">Join</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/app.js"></script>
+  </body>
+</html>
