@@ -1,7 +1,7 @@
 import { Room } from "./room.js";
 import "./style.css";
 
-console.log("App.js loaded"); // Debug check
+console.log("App.js loaded");
 
 class App {
     constructor() {
@@ -15,21 +15,42 @@ class App {
         this.emptyState = document.getElementById('empty-state');
 
         if (!this.roomListEl || !this.modal) {
-            console.error("Critical DOM elements missing. Check index.html IDs.");
+            console.error("Critical DOM elements missing.");
             return;
         }
 
         this.bindEvents();
+        this.initDeepLinking(); // <--- Start listening for links
+    }
+
+    // --- NEW: Deep Linking Logic ---
+    initDeepLinking() {
+        if (window.electronAPI) {
+            window.electronAPI.onDeepLink((url) => {
+                console.log("Deep link received:", url);
+                // Format: p2pshare://join/ROOMID
+                // Remove protocol
+                const cleanUrl = url.replace('p2pshare://', '');
+                const parts = cleanUrl.split('/');
+                
+                // Check if it's a join command
+                if (parts[0] === 'join' && parts[1]) {
+                    const roomId = parts[1].toUpperCase().replace(/\/$/, ''); // Remove trailing slash
+                    console.log("Auto-joining room:", roomId);
+                    this.createRoom(roomId, false); // false = joiner
+                    
+                    // Close modal if it was open
+                    this.modal.style.display = 'none';
+                }
+            });
+        }
     }
 
     bindEvents() {
-        // 1. Open Modal (The Plus Button)
+        // 1. Open Modal
         const openBtn = document.getElementById('open-modal-btn');
         if (openBtn) {
-            openBtn.onclick = () => {
-                console.log("Plus button clicked");
-                this.modal.style.display = 'flex';
-            };
+            openBtn.onclick = () => this.modal.style.display = 'flex';
         }
 
         // 2. Close Modal
@@ -38,7 +59,7 @@ class App {
             closeBtn.onclick = () => this.modal.style.display = 'none';
         }
 
-        // 3. Create New Room Button
+        // 3. Create New Room
         const createBtn = document.getElementById('create-room-btn');
         if (createBtn) {
             createBtn.onclick = () => {
@@ -48,7 +69,7 @@ class App {
             };
         }
 
-        // 4. Join Room Button
+        // 4. Join Room
         const joinBtn = document.getElementById('join-room-btn');
         if (joinBtn) {
             joinBtn.onclick = () => {
@@ -57,12 +78,12 @@ class App {
                 if (id) {
                     this.createRoom(id, false); // false = answerer
                     this.modal.style.display = 'none';
-                    input.value = ''; // Clear input
+                    input.value = ''; 
                 }
             };
         }
 
-        // 5. Listen for room close events (from Room class)
+        // 5. Room Closed Event
         document.addEventListener('room-closed', (e) => {
             this.closeRoom(e.detail);
         });
@@ -70,52 +91,42 @@ class App {
 
     createRoom(id, isOfferer) {
         if (this.rooms[id]) {
-            this.switchTab(id); // Already exists, just switch
+            this.switchTab(id);
             return;
         }
 
-        // Hide empty state
         if (this.emptyState) this.emptyState.style.display = 'none';
 
-        // Add to Sidebar
+        // Add Sidebar Tab
         const li = document.createElement('li');
         li.className = 'room-item';
         li.id = `tab-${id}`;
-        li.innerHTML = `
-            <span>${id}</span>
-            <button class="close-room-btn" title="Close">x</button>
-        `;
+        li.innerHTML = `<span>${id}</span><button class="close-room-btn" title="Close">x</button>`;
         
-        // Tab Click (Switch)
         li.onclick = (e) => {
-            // Only switch if we didn't click the close button
             if (e.target.className !== 'close-room-btn') this.switchTab(id);
         };
 
-        // Close Button Click
         li.querySelector('.close-room-btn').onclick = (e) => {
-            e.stopPropagation(); // Stop bubbling to tab click
+            e.stopPropagation();
             if (this.rooms[id]) this.rooms[id].destroy();
         };
         
         this.roomListEl.appendChild(li);
 
-        // Initialize Room Logic
+        // Init Room
         const room = new Room(id, isOfferer, this.container);
         this.rooms[id] = room;
 
-        // Switch to the new room
         this.switchTab(id);
     }
 
     closeRoom(id) {
-        // Remove sidebar tab
         const tab = document.getElementById(`tab-${id}`);
         if (tab) tab.remove();
         
         delete this.rooms[id];
 
-        // If we closed the active room, switch to another or show empty state
         if (this.activeRoomId === id) {
             const remaining = Object.keys(this.rooms);
             if (remaining.length > 0) {
@@ -130,15 +141,15 @@ class App {
     switchTab(id) {
         this.activeRoomId = id;
 
-        // Update Sidebar UI
+        // Update Sidebar
         document.querySelectorAll('.room-item').forEach(el => el.classList.remove('active'));
         const activeTab = document.getElementById(`tab-${id}`);
         if (activeTab) activeTab.classList.add('active');
 
-        // Update Main View UI
+        // Update Main View
         document.querySelectorAll('.room-view').forEach(el => el.style.display = 'none');
         const activeView = document.getElementById(`view-${id}`);
-        if (activeView) activeView.style.display = 'flex'; // Assuming flex layout for room view
+        if (activeView) activeView.style.display = 'flex'; 
     }
 }
 
