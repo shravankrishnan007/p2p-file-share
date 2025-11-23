@@ -254,36 +254,54 @@ export class Room {
 
     startSending(id, startOffset) {
         const transfer = this.activeTransfers[id];
-        if(!transfer) return;
+        if (!transfer) return;
+
         transfer.status = 'transferring';
         transfer.offset = startOffset;
-        
+
+        this.startTransferUI(id);
         this.webrtc.send(JSON.stringify({ type: 'chunk-start', id }));
 
-        // Remove "Waiting" text
-        const statusText = this.view.querySelector(`#status-text-${id}`);
-        if(statusText) statusText.textContent = "Starting...";
+        // OPTIMIZATION: Increase chunk size to 64KB for better throughput
+        const chunkSize = 64 * 1024; 
+        // BACKPRESSURE LIMIT: Stop reading if buffer > 16MB
+        const MAX_BUFFER = 16 * 1024 * 1024; 
 
-        const chunkSize = 16 * 1024;
         let lastUpdate = Date.now();
         let lastOffset = startOffset;
 
         const readNextChunk = () => {
-            if (!this.activeTransfers[id] || transfer.status !== 'transferring') return;
+            // Safety checks
+            if (!this.activeTransfers[id] || transfer.status === 'cancelled') return;
+            if (transfer.status === 'paused' || transfer.status === 'interrupted') return;
+
+            // CRITICAL FIX: Check buffer BEFORE reading
+            if (this.webrtc.bufferedAmount > MAX_BUFFER) {
+                // Buffer full! Stop and wait for 'onbufferedamountlow' event.
+                console.log("Buffer full, waiting...");
+                return; 
+            }
+
             const slice = transfer.file.slice(transfer.offset, transfer.offset + chunkSize);
             transfer.reader.readAsArrayBuffer(slice);
         };
         
         transfer.resumeFn = readNextChunk;
+
+        // EVENT LISTENER: This restarts the loop when the buffer drains
         this.webrtc.setBufferedAmountLowCallback(() => {
-            if (transfer.status === 'transferring') readNextChunk();
+            if (transfer.status === 'transferring') {
+                readNextChunk();
+            }
         });
 
         transfer.reader.onload = (e) => {
             if (transfer.status !== 'transferring') return;
+
             this.webrtc.send(e.target.result);
             transfer.offset += e.target.result.byteLength;
 
+            // Update UI
             const now = Date.now();
             if (now - lastUpdate > 500 || transfer.offset >= transfer.file.size) {
                 const speed = (transfer.offset - lastOffset) / ((now - lastUpdate) / 1000);
@@ -292,13 +310,18 @@ export class Room {
                 lastOffset = transfer.offset;
             }
 
+            // FINISH or CONTINUE
             if (transfer.offset < transfer.file.size) {
-                if (this.webrtc.bufferedAmount < 1024 * 1024) readNextChunk();
+                // Recursively call readNextChunk immediately
+                // The check inside readNextChunk will decide if we need to pause for buffer
+                readNextChunk();
             } else {
                 this.markCompleteUI(id, true);
                 delete this.activeTransfers[id];
             }
         };
+
+        // Kickoff
         readNextChunk();
     }
 

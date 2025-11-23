@@ -36,6 +36,8 @@ export class WebRTCManager {
         this.dataChannel = channel;
         this.dataChannel.binaryType = 'arraybuffer';
 
+        this.dataChannel.bufferedAmountLowThreshold = 0;
+
         this.dataChannel.onopen = () => {
             this.callbacks.onDataChannelOpen();
         };
@@ -73,7 +75,10 @@ export class WebRTCManager {
 
     send(data) {
         if (this.dataChannel && this.dataChannel.readyState === 'open') {
-            this.dataChannel.send(data);
+            try{this.dataChannel.send(data);
+            } catch (error) {
+                console.error("Send failed", error);
+            }
         }
     }
 
@@ -84,7 +89,7 @@ export class WebRTCManager {
     setBufferedAmountLowCallback(callback) {
         if (this.dataChannel) {
             this.dataChannel.onbufferedamountlow = callback;
-            this.dataChannel.bufferedAmountLowThreshold = 1024 * 1024; // 1MB
+            
         }
     }
 
