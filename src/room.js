@@ -14,7 +14,7 @@ export class Room {
         this.currentReceivingId = null;
         this.isConnected = false;
         
-        // Clipboard
+        // Clipboard State
         this.isClipboardSyncing = false;
         this.lastClipboardText = "";
         this.clipboardInterval = null;
@@ -49,6 +49,7 @@ export class Room {
                     <button class="tool-btn" id="add-files-${this.id}" title="Add File">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/></svg>
                     </button>
+                    
                     <button class="tool-btn" id="disconnect-${this.id}" title="Disconnect" style="color:#f38ba8; border-color:#f38ba8">
                         <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm5 11H7v-2h10v2z"/></svg>
                     </button>
@@ -126,6 +127,13 @@ export class Room {
         }
     }
 
+    pauseAllTransfers() {
+        Object.keys(this.activeTransfers).forEach(id => {
+            this.activeTransfers[id].status = 'interrupted';
+            UI.toggleResumeUI(id, true);
+        });
+    }
+
     // --- FILE LOGIC ---
     handleFileSelect(e) {
         const files = e.target.files;
@@ -153,6 +161,14 @@ export class Room {
                     this.lastClipboardText = msg.content; 
                     if (window.electronAPI) window.electronAPI.writeClipboard(msg.content);
                     else navigator.clipboard.writeText(msg.content).catch(()=>{});
+                    
+                    // UI Feedback
+                    const btn = this.view.querySelector(`#clipboard-btn-${this.id}`);
+                    if(btn) {
+                        const oldColor = btn.style.color;
+                        btn.style.color = "white";
+                        setTimeout(() => btn.style.color = oldColor, 200);
+                    }
                     break;
             }
         } else {
@@ -160,9 +176,10 @@ export class Room {
         }
     }
 
-    // --- UI Helpers ---
+    // --- UI Helper Wrapper ---
     addFileRow(meta, isSender) {
         const list = this.view.querySelector(`#transfer-list-${this.id}`);
+        // Calls UI.addFileEntryToContainer instead of old addFileEntry
         UI.addFileEntryToContainer(list, meta.id, meta.name, meta.size, isSender, {
             onDownload: () => this.initiateDownload(meta),
             onPause: (paused) => this.togglePause(meta.id, paused),
@@ -170,7 +187,7 @@ export class Room {
         });
     }
 
-    // --- TRANSFER LOGIC (Standard) ---
+    // --- TRANSFER LOGIC ---
     async initiateDownload(meta) {
         const id = meta.id;
         this.activeTransfers[id] = {
@@ -187,7 +204,7 @@ export class Room {
             if (err.name === 'AbortError') { delete this.activeTransfers[id]; return; }
         }
 
-        UI.startTransferUI(id); // Shows "Starting..." text
+        UI.startTransferUI(id); // Shows "Starting..."
         this.webrtc.send(JSON.stringify({ type: 'request-file', id, offset: 0 }));
     }
 
@@ -200,7 +217,7 @@ export class Room {
         
         this.webrtc.send(JSON.stringify({ type: 'chunk-start', id }));
         
-        // Update UI using local view query
+        // Update UI manually since startTransferUI is global
         const row = this.view.querySelector(`#file-${id}`);
         if(row) {
             const statusText = row.querySelector(`#status-text-${id}`);
@@ -208,7 +225,8 @@ export class Room {
         }
 
         const chunkSize = 64 * 1024;
-        const MAX_BUFFER = 16 * 1024 * 1024; 
+        const MAX_BUFFER = 1 * 1024 * 1024; // 1MB Backpressure Limit (High Speed Stability)
+        
         let lastUpdate = Date.now();
         let lastOffset = startOffset;
 
@@ -243,11 +261,23 @@ export class Room {
             if (transfer.offset < transfer.file.size) {
                 readNextChunk();
             } else {
-                UI.markFileComplete(id, true);
-                delete this.activeTransfers[id];
+                // WAIT FOR BUFFER TO EMPTY (The Fix)
+                this.waitForDrain(id);
             }
         };
         readNextChunk();
+    }
+
+    waitForDrain(id) {
+        const checkEnd = () => {
+            if (this.webrtc.bufferedAmount === 0) {
+                UI.markFileComplete(id, true);
+                delete this.activeTransfers[id];
+            } else {
+                setTimeout(checkEnd, 50);
+            }
+        };
+        checkEnd();
     }
 
     async handleBinary(data) {
@@ -348,13 +378,6 @@ export class Room {
     handleRemoteCancel(id) {
         this.cancelTransfer(id, false);
         alert("Transfer cancelled by peer");
-    }
-
-    pauseAllTransfers() {
-        Object.keys(this.activeTransfers).forEach(id => {
-            this.activeTransfers[id].status = 'interrupted';
-            UI.toggleResumeUI(id, true);
-        });
     }
 
     destroy() {
