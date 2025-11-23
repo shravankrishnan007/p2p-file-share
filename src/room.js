@@ -156,13 +156,11 @@ export class Room {
                     if(this.activeTransfers[msg.id]) this.activeTransfers[msg.id].isReceiving = true;
                     break;
                 case 'cancel-transfer': this.cancelTransfer(msg.id, false); break;
-                // Clipboard Logic
                 case 'clipboard':
                     this.lastClipboardText = msg.content; 
                     if (window.electronAPI) window.electronAPI.writeClipboard(msg.content);
                     else navigator.clipboard.writeText(msg.content).catch(()=>{});
                     
-                    // UI Feedback
                     const btn = this.view.querySelector(`#clipboard-btn-${this.id}`);
                     if(btn) {
                         const oldColor = btn.style.color;
@@ -179,7 +177,6 @@ export class Room {
     // --- UI Helper Wrapper ---
     addFileRow(meta, isSender) {
         const list = this.view.querySelector(`#transfer-list-${this.id}`);
-        // Calls UI.addFileEntryToContainer instead of old addFileEntry
         UI.addFileEntryToContainer(list, meta.id, meta.name, meta.size, isSender, {
             onDownload: () => this.initiateDownload(meta),
             onPause: (paused) => this.togglePause(meta.id, paused),
@@ -204,52 +201,95 @@ export class Room {
             if (err.name === 'AbortError') { delete this.activeTransfers[id]; return; }
         }
 
-        UI.startTransferUI(id); // Shows "Starting..."
+        UI.startTransferUI(id);
         this.webrtc.send(JSON.stringify({ type: 'request-file', id, offset: 0 }));
     }
 
+    // ---------------------------------------------------------
+    // FIX STARTS HERE: Robust "Pump" Mechanism for Sending
+    // ---------------------------------------------------------
     startSending(id, startOffset) {
         const transfer = this.activeTransfers[id];
         if(!transfer) return;
         
         transfer.status = 'transferring';
         transfer.offset = startOffset;
+        // Flags to manage loop state
+        transfer.waitingForDrain = false; 
         
         this.webrtc.send(JSON.stringify({ type: 'chunk-start', id }));
         
-        // Update UI manually since startTransferUI is global
         const row = this.view.querySelector(`#file-${id}`);
-        if(row) {
-            const statusText = row.querySelector(`#status-text-${id}`);
-            if(statusText) statusText.textContent = "Uploading...";
-        }
+        if(row) row.querySelector(`#status-text-${id}`).textContent = "Uploading...";
 
+        // Increase chunk size for speed
         const chunkSize = 64 * 1024;
-        const MAX_BUFFER = 1 * 1024 * 1024; // 1MB Backpressure Limit (High Speed Stability)
+        // Limit buffer to 4MB to prevent crash/stuck
+        const MAX_BUFFER = 4 * 1024 * 1024; 
         
         let lastUpdate = Date.now();
         let lastOffset = startOffset;
 
-        const readNextChunk = () => {
-            if (!this.activeTransfers[id] || transfer.status === 'cancelled') return;
-            if (transfer.status === 'paused' || transfer.status === 'interrupted') return;
-            
-            if (this.webrtc.bufferedAmount > MAX_BUFFER) return;
+        // 1. Define the "Pump" function (The Loop)
+        const pump = () => {
+            // Check Stop Conditions
+            if (!this.activeTransfers[id]) return;
+            if (transfer.status !== 'transferring') return;
 
-            const slice = transfer.file.slice(transfer.offset, transfer.offset + chunkSize);
-            transfer.reader.readAsArrayBuffer(slice);
+            // Check Backpressure
+            if (this.webrtc.bufferedAmount > MAX_BUFFER) {
+                if (!transfer.waitingForDrain) {
+                    // console.log("Buffer full, pausing read...");
+                    transfer.waitingForDrain = true;
+                }
+                return; // Stop reading. 'onbufferedamountlow' will restart us.
+            }
+
+            // Read Next Chunk
+            if (transfer.offset < transfer.file.size) {
+                const slice = transfer.file.slice(transfer.offset, transfer.offset + chunkSize);
+                transfer.reader.readAsArrayBuffer(slice);
+            } else {
+                // File read done, but is buffer empty?
+                if (this.webrtc.bufferedAmount === 0) {
+                    UI.markFileComplete(id, true);
+                    delete this.activeTransfers[id];
+                } else {
+                    // Wait for drain before marking complete
+                    setTimeout(pump, 50);
+                }
+            }
         };
-        
-        transfer.resumeFn = readNextChunk;
+
+        // 2. Bind the Resume Function (For Pause/Resume button)
+        transfer.resumeFn = () => {
+            transfer.waitingForDrain = false;
+            pump();
+        };
+
+        // 3. Listen for Drain Event (To restart loop)
         this.webrtc.setBufferedAmountLowCallback(() => {
-            if (transfer.status === 'transferring') readNextChunk();
+            // If we were paused due to full buffer, resume now!
+            if (transfer.status === 'transferring') {
+                transfer.waitingForDrain = false;
+                pump();
+            }
         });
 
+        // 4. Handle File Read Event
         transfer.reader.onload = (e) => {
             if (transfer.status !== 'transferring') return;
-            this.webrtc.send(e.target.result);
+
+            try {
+                this.webrtc.send(e.target.result);
+            } catch(err) {
+                console.error("Send failed", err);
+                return; 
+            }
+            
             transfer.offset += e.target.result.byteLength;
 
+            // Update Speedometer
             const now = Date.now();
             if (now - lastUpdate > 500 || transfer.offset >= transfer.file.size) {
                 const speed = (transfer.offset - lastOffset) / ((now - lastUpdate) / 1000);
@@ -258,27 +298,16 @@ export class Room {
                 lastOffset = transfer.offset;
             }
 
-            if (transfer.offset < transfer.file.size) {
-                readNextChunk();
-            } else {
-                // WAIT FOR BUFFER TO EMPTY (The Fix)
-                this.waitForDrain(id);
-            }
+            // Loop
+            pump();
         };
-        readNextChunk();
-    }
 
-    waitForDrain(id) {
-        const checkEnd = () => {
-            if (this.webrtc.bufferedAmount === 0) {
-                UI.markFileComplete(id, true);
-                delete this.activeTransfers[id];
-            } else {
-                setTimeout(checkEnd, 50);
-            }
-        };
-        checkEnd();
+        // 5. Start!
+        pump();
     }
+    // ---------------------------------------------------------
+    // FIX ENDS HERE
+    // ---------------------------------------------------------
 
     async handleBinary(data) {
         const id = this.currentReceivingId;
@@ -317,38 +346,6 @@ export class Room {
         delete this.activeTransfers[id];
     }
 
-    // --- CLIPBOARD ---
-    toggleClipboard(btn) {
-        this.isClipboardSyncing = !this.isClipboardSyncing;
-        
-        if (this.isClipboardSyncing) {
-            btn.style.color = "#a6e3a1"; 
-            btn.style.borderColor = "#a6e3a1";
-            this.startClipboardLoop();
-        } else {
-            btn.style.color = ""; 
-            btn.style.borderColor = "";
-            this.stopClipboardLoop();
-        }
-    }
-
-    startClipboardLoop() {
-        this.clipboardInterval = setInterval(async () => {
-            if (!this.isConnected) return;
-            let text = "";
-            if (window.electronAPI) text = await window.electronAPI.readClipboard();
-            else try { text = await navigator.clipboard.readText(); } catch(e){}
-
-            if (text && text !== this.lastClipboardText) {
-                this.lastClipboardText = text;
-                this.webrtc.send(JSON.stringify({ type: 'clipboard', content: text }));
-            }
-        }, 1000);
-    }
-
-    stopClipboardLoop() { if (this.clipboardInterval) clearInterval(this.clipboardInterval); }
-
-    // --- CONTROLS ---
     togglePause(id, isPaused) {
         const transfer = this.activeTransfers[id];
         if (!transfer) return;
@@ -358,6 +355,7 @@ export class Room {
             UI.togglePauseUI(id, true);
         } else {
             transfer.status = 'transferring';
+            // Trigger the pump to restart
             if(transfer.resumeFn) transfer.resumeFn();
             UI.togglePauseUI(id, false);
         }
