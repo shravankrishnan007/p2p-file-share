@@ -113,17 +113,16 @@ svg {
 }
 .tool-btn:hover { background: #444; color: white; }
 
-/* FIX: Removed space before [fill] to target the SVG itself if needed */
 .tool-btn svg[fill="currentColor"] {
   fill: currentColor;
   stroke: none;
 }
 
-/* --- GRID TABLE --- */
+/* --- GRID TABLE (8 COLUMNS) --- */
 .data-grid-header, .transfer-row {
   display: grid;
-  /* Fixed Columns: Checkbox | Action | Name | Status | Speed | Size | Date */
-  grid-template-columns: 30px 70px minmax(200px, 1fr) 120px 100px 100px 100px;
+  /* Columns: Checkbox | Action | Name | Status | Speed | Size | ETA | Date */
+  grid-template-columns: 30px 70px minmax(200px, 1fr) 120px 100px 100px 80px 100px;
   align-items: center;
   padding: 0 10px;
   border-bottom: 1px solid var(--border);
